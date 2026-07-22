@@ -1,0 +1,23 @@
+title: Directory status (file count and freshness)
+agents: linux
+catalog: os/files
+license: GPL-2.0-or-later
+distribution: check_mk
+description:
+ The check monitors configured directories on Linux hosts. For each directory it
+ reports the number of regular files (non-recursive) and the age of the newest
+ file (based on modification time).
+
+ Thresholds for the maximum number of files and the maximum age of the newest
+ file can be configured via the WATO ruleset
+ {Directory status (file count and freshness)}.
+
+ Directories to monitor are configured via the agent bakery ruleset
+ {Directory status (Linux)} or by placing paths in
+ {$MK_CONFDIR}/directory_status.cfg on the host.
+
+item:
+ Absolute path of the monitored directory.
+
+discovery:
+ One service is created for each directory reported by the agent plug-in.

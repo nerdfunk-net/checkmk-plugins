@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# Copyright (C) 2026
+# SPDX-License-Identifier: GPL-2.0-or-later
+"""Agent plug-in: report file count and newest-file age for configured directories.
+
+Output section:
+  <<<directory_status:sep(124)>>>
+  /path/to/dir|ok|12|3600|newest.txt
+  /missing/dir|missing||||
+  /empty/dir|ok|0|||
+
+Fields (pipe-separated):
+  path | status | file_count | age_newest_seconds | newest_filename
+
+status is "ok" or "missing". age_newest_seconds / newest_filename are empty when
+the directory has no files.
+
+Only regular files are counted (non-recursive). Symbolic links are ignored.
+Directory paths must not contain the '|' character (used as field separator).
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import time
+from pathlib import Path
+
+
+def _conf_dir() -> Path:
+    return Path(os.environ.get("MK_CONFDIR", "/etc/check_mk"))
+
+
+def _read_directories(config_path: Path) -> list[str]:
+    if not config_path.is_file():
+        return []
+
+    directories: list[str] = []
+    for raw_line in config_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        directories.append(line)
+    return directories
+
+
+def _scan_directory(directory: str) -> tuple[str, int | None, float | None, str | None]:
+    path = Path(directory)
+    if not path.is_dir():
+        return "missing", None, None, None
+
+    count = 0
+    newest_mtime: float | None = None
+    newest_name: str | None = None
+    now = time.time()
+
+    try:
+        with os.scandir(path) as entries:
+            for entry in entries:
+                try:
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+                    stat = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+
+                count += 1
+                if newest_mtime is None or stat.st_mtime > newest_mtime:
+                    newest_mtime = stat.st_mtime
+                    newest_name = entry.name
+    except OSError:
+        return "missing", None, None, None
+
+    if newest_mtime is None:
+        return "ok", count, None, None
+
+    age = max(0.0, now - newest_mtime)
+    return "ok", count, age, newest_name
+
+
+def _escape(value: str) -> str:
+    return value.replace("|", "_").replace("\n", " ").replace("\r", " ")
+
+
+def main() -> int:
+    config_path = _conf_dir() / "directory_status.cfg"
+    directories = _read_directories(config_path)
+    if not directories:
+        return 0
+
+    sys.stdout.write("<<<directory_status:sep(124)>>>\n")
+    for directory in directories:
+        status, count, age, newest = _scan_directory(directory)
+        count_s = "" if count is None else str(count)
+        age_s = "" if age is None else f"{age:.0f}"
+        newest_s = "" if newest is None else _escape(newest)
+        sys.stdout.write(
+            f"{_escape(directory)}|{status}|{count_s}|{age_s}|{newest_s}\n"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
